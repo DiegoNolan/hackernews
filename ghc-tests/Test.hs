@@ -25,9 +25,10 @@ main = do
        Just x == decode (encode x)
     it "should retrieve item" $ do
       (`shouldSatisfy` isRight) =<< getItem mgr (ItemId 1000)
+    {-
     it "should return NotFound " $ do
       Left x <- getItem mgr (ItemId 0)
-      x `shouldBe` NotFound
+      x `shouldBe` NotFound -}
     it "should retrieve user" $ do
       (`shouldSatisfy` isRight) =<< getUser mgr (UserId "dmjio")
     it "should retrieve max item" $ do

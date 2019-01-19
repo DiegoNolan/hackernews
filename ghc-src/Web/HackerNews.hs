@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE KindSignatures             #-}
 {-# LANGUAGE DeriveGeneric              #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TypeOperators              #-}
 {-# LANGUAGE DataKinds                  #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -80,7 +81,7 @@ import           Network.HTTP.Client        (Manager)
 import           Network.HTTP.Types.Status
 import           Servant.API
 import           Servant.Client
-import           Servant.Common.Req
+import           Servant.Client.Core.Internal.Request (appendToPath)
 
 import           Web.HackerNews.Types
 
@@ -101,13 +102,16 @@ type HackerNewsAPI =
 data HackerCapture (a :: *)
 
 -- | Custom combinator `HasClient` instance
-instance (ToHttpApiData a, HasClient api) => HasClient (HackerCapture a :> api) where
-  type Client (HackerCapture a :> api) = a -> Client api
-  clientWithRoute Proxy req val =
-    clientWithRoute (Proxy :: Proxy api)
-       (appendToPath p req)
+instance (ToHttpApiData a, HasClient m api) => HasClient m (HackerCapture a :> api) where
+  type Client m (HackerCapture a :> api) = a -> Client m api
+  clientWithRoute pm Proxy req val =
+    clientWithRoute pm (Proxy :: Proxy api)
+      (appendToPath p req)
     where
-      p = T.unpack $ toUrlPiece val <> ".json"
+      p = toUrlPiece val <> ".json"
+
+  hoistClientMonad pm _ f cl = \val ->
+    hoistClientMonad pm (Proxy :: Proxy api) f (cl val)
 
 -- | HN `BaseURL`
 hackerNewsURL :: BaseUrl
@@ -118,24 +122,17 @@ toError :: Either ServantError ok -> Either HackerNewsError ok
 toError = first go
   where
     go :: ServantError -> HackerNewsError
-#if MIN_VERSION_servant_client(0,11,0)
-    go (FailureResponse _ Status{..} _ body) =
-#else
-    go (FailureResponse Status{..} _ body) =
-#endif
-      FailureResponseError statusCode (cs statusMessage) (cs body)
-    go (DecodeFailure _ _ "null") = NotFound
-    go (DecodeFailure err _ body) =
-      DecodeFailureError (cs err) (cs body)
-    go (UnsupportedContentType _ body) =
-      UnsupportedContentTypeError (cs body)
-    go (InvalidContentTypeHeader header body) =
-      InvalidContentTypeHeaderError (cs header) (cs body)
+    go (FailureResponse resp) =
+      FailureResponseError (statusCode (responseStatusCode resp))
+                            ("") (cs (responseBody resp))
+    go (DecodeFailure err resp) =
+      DecodeFailureError (cs err) (cs (responseBody resp))
+    go (UnsupportedContentType _ resp) =
+      UnsupportedContentTypeError (cs (responseBody resp))
+    go (InvalidContentTypeHeader resp) =
+      InvalidContentTypeHeaderError "" (cs (responseBody resp))
     go (ConnectionError ex) =
       HNConnectionError $ cs (show ex)
-
-mkClientEnv :: Manager -> ClientEnv
-mkClientEnv = flip ClientEnv hackerNewsURL
 
 -- | Retrieve `Item`
 getItem :: Manager -> ItemId -> IO (Either HackerNewsError Item)
@@ -143,7 +140,7 @@ getItem mgr itemId =
   toError <$> do
     runClientM
       (getItem' itemId)
-      (mkClientEnv mgr)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `User`
 getUser :: Manager -> UserId -> IO (Either HackerNewsError User)
@@ -151,7 +148,7 @@ getUser mgr userId =
   toError <$> do
     runClientM
       (getUser' userId)
-      (ClientEnv mgr hackerNewsURL)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `MaxItem`
 getMaxItem :: Manager -> IO (Either HackerNewsError MaxItem)
@@ -159,7 +156,7 @@ getMaxItem mgr =
   toError <$> do
     runClientM
       getMaxItem'
-      (ClientEnv mgr hackerNewsURL)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `TopStories`
 getTopStories :: Manager -> IO (Either HackerNewsError TopStories)
@@ -167,7 +164,7 @@ getTopStories mgr =
   toError <$> do
     runClientM
       getTopStories'
-      (mkClientEnv mgr)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `NewStories`
 getNewStories :: Manager -> IO (Either HackerNewsError NewStories)
@@ -175,7 +172,7 @@ getNewStories mgr =
   toError <$> do
     runClientM
       getNewStories'
-      (mkClientEnv mgr)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `BestStories`
 getBestStories :: Manager -> IO (Either HackerNewsError BestStories)
@@ -183,7 +180,7 @@ getBestStories mgr =
   toError <$> do
     runClientM
       getBestStories'
-      (mkClientEnv mgr)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `AskStories`
 getAskStories :: Manager -> IO (Either HackerNewsError AskStories)
@@ -191,7 +188,7 @@ getAskStories mgr =
   toError <$> do
     runClientM
       getAskStories'
-      (mkClientEnv mgr)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `ShowStories`
 getShowStories :: Manager -> IO (Either HackerNewsError ShowStories)
@@ -199,7 +196,7 @@ getShowStories mgr =
   toError <$> do
     runClientM
       getShowStories'
-      (mkClientEnv mgr)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `JobStories`
 getJobStories :: Manager -> IO (Either HackerNewsError JobStories)
@@ -207,7 +204,7 @@ getJobStories mgr =
   toError <$> do
     runClientM
       getJobStories'
-      (mkClientEnv mgr)
+      (mkClientEnv mgr hackerNewsURL)
 
 -- | Retrieve `Updates`
 getUpdates :: Manager -> IO (Either HackerNewsError Updates)
@@ -215,7 +212,7 @@ getUpdates mgr =
   toError <$> do
     runClientM
       getUpdates'
-      (mkClientEnv mgr)
+      (mkClientEnv mgr hackerNewsURL)
 
 getItem' :: ItemId -> ClientM Item
 getUser' :: UserId -> ClientM User
